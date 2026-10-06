@@ -30,6 +30,7 @@
 #include <Fonts/FreeSansBold12pt7b.h>
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSansBold9pt7b.h>
 #include "secrets.h"
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -1200,42 +1201,43 @@ void drawPortfolio() {
   double gainPct = cost > 0 ? gain / cost * 100.0 : 0;
 
   label(M, 76, "TOTAL VALUE");
-  txt(16, 146, usd(val), &FreeSansBold24pt7b, C_BLACK, 2);   // 24pt x2 is ~68px tall: baseline must clear the label
+  txt(16, 154, usd(val), &FreeSansBold24pt7b, C_BLACK, 2);   // 24pt x2 digits are 70px tall;
+                                                             // baseline 154 leaves 7px under the label
   label(510, 76, "TODAY");
-  txt(510, 106, usdS(day) + "  " + pctS(dayPct), &FreeSansBold18pt7b, signCol(day));
-  label(510, 130, "TOTAL GAIN / LOSS");
-  txt(510, 160, usdS(gain) + "  " + pctS(gainPct), &FreeSansBold18pt7b, signCol(gain));
-  display.fillRect(M, 172, SCR_W - 2 * M, 2, C_BLACK);
+  txt(510, 110, usdS(day) + "  " + pctS(dayPct), &FreeSansBold18pt7b, signCol(day));
+  label(510, 134, "TOTAL GAIN / LOSS");
+  txt(510, 168, usdS(gain) + "  " + pctS(gainPct), &FreeSansBold18pt7b, signCol(gain));
+  display.fillRect(M, 178, SCR_W - 2 * M, 2, C_BLACK);
 
   const int cLAST = 270, cDAY = 395, cDPC = 505, cVAL = 650, cTPC = SCR_W - M;
-  label(M, 190, "SYMBOL");
-  txtR(cLAST, 190, "LAST",    &FreeSans9pt7b);
-  txtR(cDAY,  190, "DAY",     &FreeSans9pt7b);
-  txtR(cDPC,  190, "DAY %",   &FreeSans9pt7b);
-  txtR(cVAL,  190, "VALUE",   &FreeSans9pt7b);
-  txtR(cTPC,  190, "TOTAL %", &FreeSans9pt7b);
+  label(M, 196, "SYMBOL");
+  txtR(cLAST, 196, "LAST",    &FreeSans9pt7b);
+  txtR(cDAY,  196, "DAY",     &FreeSans9pt7b);
+  txtR(cDPC,  196, "DAY %",   &FreeSans9pt7b);
+  txtR(cVAL,  196, "VALUE",   &FreeSans9pt7b);
+  txtR(cTPC,  196, "TOTAL %", &FreeSans9pt7b);
 
-  int y = 212;
-  for (int i = 0; i < NHOLD; i++, y += 26) {
+  int y = 218;
+  for (int i = 0; i < NHOLD; i++, y += 22) {
     Holding& h = HOLD[i];
-    txt(M, y, h.sym, &FreeSansBold12pt7b);
-    if (h.price <= 0) { txtR(cVAL, y, "no quote", &FreeSans12pt7b, C_RED); continue; }
+    txt(M, y, h.sym, &FreeSansBold9pt7b);
+    if (h.price <= 0) { txtR(cVAL, y, "no quote", &FreeSans9pt7b, C_RED); continue; }
     double v = (double)h.qty * h.price;
     double d = h.prev > 0 ? (double)h.qty * (h.price - h.prev) : 0;
     double dp = h.prev > 0 ? (h.price / h.prev - 1) * 100.0 : 0;
     double g = v - h.cost, gp = h.cost > 0 ? g / h.cost * 100.0 : 0;
-    txtR(cLAST, y, f2(h.price), &FreeSans12pt7b);
-    txtR(cDAY,  y, usdS(d),  &FreeSans12pt7b, signCol(d));
-    txtR(cDPC,  y, pctS(dp), &FreeSans12pt7b, signCol(d));
-    txtR(cVAL,  y, usd(v),   &FreeSansBold12pt7b);
-    txtR(cTPC,  y, pctS(gp), &FreeSans12pt7b, gp < -0.005 ? C_RED : C_BLACK);
+    txtR(cLAST, y, f2(h.price), &FreeSans9pt7b);
+    txtR(cDAY,  y, usdS(d),  &FreeSans9pt7b, signCol(d));
+    txtR(cDPC,  y, pctS(dp), &FreeSans9pt7b, signCol(d));
+    txtR(cVAL,  y, usd(v),   &FreeSansBold9pt7b);
+    txtR(cTPC,  y, pctS(gp), &FreeSans9pt7b, gp < -0.005 ? C_RED : C_BLACK);
   }
   display.drawFastHLine(M, y - 16, SCR_W - 2 * M, C_BLACK);
-  txt(M, y + 2, "CASH", &FreeSansBold12pt7b);
-  txtR(cVAL, y + 2, usd(CASH_USD), &FreeSansBold12pt7b);
-  txt(M, y + 26, "TREASURY", &FreeSansBold12pt7b);
-  txt(140, y + 26, "separate account - not in the total above", &FreeSans9pt7b);
-  txtR(cVAL, y + 26, usd(TREASURY_USD), &FreeSansBold12pt7b);
+  txt(M, y + 2, "CASH", &FreeSansBold9pt7b);
+  txtR(cVAL, y + 2, usd(CASH_USD), &FreeSansBold9pt7b);
+  txt(M, y + 24, "TREASURY", &FreeSansBold9pt7b);
+  txt(120, y + 24, "separate account - not in the total above", &FreeSans9pt7b);
+  txtR(cVAL, y + 24, usd(TREASURY_USD), &FreeSansBold9pt7b);
 
   // ---- market context: is my day market-wide or my own? ----
   // Measure each entry and share the leftover space out as equal gaps - safe for any value length.
