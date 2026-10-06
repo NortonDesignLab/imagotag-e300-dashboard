@@ -216,7 +216,7 @@ const uint32_t QUAKE_MS = 15UL * 60 * 1000;
 uint32_t lastQuake = 0;
 
 // ---------------- space weather (NOAA SWPC) ----------------
-float  kpNow = NAN; float kpHist[24]; int kpHistN = 0; time_t kpAt = 0;
+float  kpNow = NAN; float kpHist[24]; time_t kpTime[24]; int kpHistN = 0; time_t kpAt = 0;
 const uint32_t SPACE_MS = 30UL * 60 * 1000;
 uint32_t lastSpace = 0;
 
@@ -637,7 +637,10 @@ bool fetchSpace() {
   kpHistN = 0;
   for (int i = start; i < n; i++) {
     float k = a[i]["Kp"] | NAN;
-    if (!isnan(k) && kpHistN < 24) kpHist[kpHistN++] = k;
+    if (!isnan(k) && kpHistN < 24) {
+      kpTime[kpHistN] = parseISO(a[i]["time_tag"] | "");   // SWPC time_tag is bare UTC
+      kpHist[kpHistN++] = k;
+    }
   }
   kpNow = kpHistN ? kpHist[kpHistN - 1] : NAN;
   time(&kpAt);
@@ -1439,8 +1442,19 @@ void drawSpace() {
       int vy = yOf(kpHist[i]);
       bar(bx, vy, bw, Y1 - vy, kpCol(kpHist[i]));
     }
+    // x axis: tick + local day/hour under every 4th sample, i.e. every 12 h
+    for (int i = 0; i < kpHistN; i += 4) {
+      if (!kpTime[i]) continue;
+      int cx = X0 + (int)(i * step) + (int)(step / 2);
+      display.drawFastVLine(cx, Y1 + 1, 5, C_BLACK);
+      struct tm lt; localtime_r(&kpTime[i], &lt);
+      char d[8]; strftime(d, sizeof d, "%a", &lt);
+      int hh = lt.tm_hour % 12; if (!hh) hh = 12;
+      char lbl[16]; snprintf(lbl, sizeof lbl, "%s %d%c", d, hh, lt.tm_hour < 12 ? 'a' : 'p');
+      txtC(cx, Y1 + 20, lbl, &FreeSans9pt7b);
+    }
   }
-  footer("services.swpc.noaa.gov    updated " + fmtTime(kpAt), "3 days, oldest left");
+  footer("services.swpc.noaa.gov    updated " + fmtTime(kpAt), "times are local");
 }
 
 // ---------------- air & allergy drawing ----------------
