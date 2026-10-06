@@ -1,0 +1,20 @@
+# --- credentials: NEVER commit. Copy secrets.h.example -> secrets.h and fill in locally.
+secrets.h
+
+# --- local toolchain
+venv/
+__pycache__/
+*.pyc
+
+# --- third-party library clone (has its own .git); fetch it yourself:
+#     git clone https://github.com/bitbank2/bb_epaper
+bb_epaper_git/
+
+# --- vendor firmware dumps (4 MB each, recreate with:
+#     esptool --port <port> read-flash 0 0x400000 backup.bin )
+firmware-backup-*.bin
+
+# --- editor/iteration backups; git is the history now
+*.bak-*
+*.bak2-*
+*.bak3-*
