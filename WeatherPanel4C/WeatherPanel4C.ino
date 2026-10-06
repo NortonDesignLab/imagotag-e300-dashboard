@@ -1339,47 +1339,75 @@ void drawRiver() {
   }
   display.fillRect(M, 210, SCR_W - 2 * M, 2, C_BLACK);
 
-  label(M, 234, "GAGE HEIGHT, LAST 24 HOURS  (ft)");
-  const int X0 = 72, X1 = SCR_W - M, Y0 = 248, Y1 = 432;
+  // Laid out like the official NWS/AHPS hydrograph for this gauge: a FIXED stage window that
+  // always shows every flood category, tinted bands between them, and the thresholds labelled
+  // on the chart. Auto-scaling to the data hid moderate/major and made a normal 5.6 ft look full.
+  label(M, 234, "STAGE (ft)     OBSERVED, LAST 24 HOURS");
+  const int X0 = 72, X1 = SCR_W - M, Y0 = 248, Y1 = 424;
   if (rivHistN >= 2) {
     float mn = 1e9, mx = -1e9;
     for (int i = 0; i < rivHistN; i++) { mn = min(mn, rivHist[i]); mx = max(mx, rivHist[i]); }
-    mx = max(mx, FLOOD_MINOR);                          // keep the action + flood lines on the chart
-    if (mx - mn < 0.5f) { float m = (mx + mn) / 2; mn = m - 0.25f; mx = m + 0.25f; }
-    float pad = (mx - mn) * 0.12f; mn -= pad; mx += pad;
-    auto yOf = [&](float v){ return (int)(Y1 - (v - mn) / (mx - mn) * (Y1 - Y0)); };
+    float lo = min(4.0f, mn - 0.5f);                    // AHPS plots this gauge from 4 ft
+    float hi = max(FLOOD_MAJOR + 1.5f, mx + 0.5f);      // 12.5 clears the 12.1 ft record
+    auto yOf = [&](float v){ return (int)(Y1 - (v - lo) / (hi - lo) * (Y1 - Y0)); };
+
+    // Tinted category bands. Hatched rather than solid: a filled red block would dominate the
+    // whole screen on a 4-colour panel, where AHPS can use a pale wash.
+    auto hatch = [&](float from, float to, uint16_t c) {
+      int ya = yOf(min(to, hi)), yb = yOf(max(from, lo));
+      for (int y = ya; y <= yb; y += 3) display.drawFastHLine(X0, y, X1 - X0, c);
+    };
+    hatch(FLOOD_ACTION, FLOOD_MODERATE, C_YELLOW);      // action + minor
+    hatch(FLOOD_MODERATE, hi,           C_RED);         // moderate + major
+
     display.drawFastVLine(X0 - 6, Y0, Y1 - Y0, C_BLACK);
-    for (int g = 0; g <= 3; g++) {
-      float v = mn + (mx - mn) * g / 3.0f; int gy = yOf(v);
-      for (int x = X0; x < X1; x += 8) display.drawPixel(x, gy, C_BLACK);
-      txtR(X0 - 10, gy + 5, String(v, 1), &FreeSans9pt7b);
+    display.drawFastHLine(X0 - 6, Y1, X1 - X0 + 6, C_BLACK);
+    for (int v = ((int)lo / 2) * 2; v <= (int)hi; v += 2) {       // stage ticks every 2 ft
+      int gy = yOf((float)v);
+      if (gy < Y0 - 2 || gy > Y1) continue;
+      display.drawFastHLine(X0 - 11, gy, 5, C_BLACK);
+      txtR(X0 - 13, gy + 5, String(v), &FreeSans9pt7b);
     }
-    { int ay = yOf(FLOOD_ACTION);                       // yellow band: action stage (Bradley, 6 Oct)
-      bar(X0, ay - 2, X1 - X0, 5, C_YELLOW);
-      txtR(X1, ay - 7, "action 6.5", &FreeSansBold12pt7b, C_YELLOW);
-      int fy = yOf(FLOOD_MINOR);                        // solid red: flood stage
-      display.drawFastHLine(X0, fy, X1 - X0, C_RED); display.drawFastHLine(X0, fy + 1, X1 - X0, C_RED);
-      txtR(X1, fy - 5, "flood 7.0", &FreeSans9pt7b, C_RED);
-      if (FLOOD_MODERATE <= mx) { int my = yOf(FLOOD_MODERATE);
-        display.drawFastHLine(X0, my, X1 - X0, C_RED); txtR(X1, my - 5, "moderate 9.0", &FreeSans9pt7b, C_RED); }
-      if (FLOOD_MAJOR <= mx) { int jy = yOf(FLOOD_MAJOR);
-        display.drawFastHLine(X0, jy, X1 - X0, C_RED); txtR(X1, jy - 5, "major 11.0", &FreeSans9pt7b, C_RED); }
+
+    struct Th { float v; const char* n; };
+    const Th TH[] = { {FLOOD_MAJOR, "Major: 11 ft"}, {FLOOD_MODERATE, "Moderate: 9 ft"},
+                      {FLOOD_MINOR, "Minor: 7 ft"},  {FLOOD_ACTION, "Action: 6.5 ft"} };
+    for (const Th& t : TH) {
+      if (t.v < lo || t.v > hi) continue;
+      int ty = yOf(t.v);
+      display.drawFastHLine(X0, ty, X1 - X0, C_BLACK);
+      txt(X0 + 6, ty - 5, t.n, &FreeSans9pt7b, C_BLACK);
     }
-    int px = -1, py = -1;
+
+    int px = -1, py = -1;                                // observed trace
     for (int i = 0; i < rivHistN; i++) {
       int gx = X0 + (int)((float)i / (rivHistN - 1) * (X1 - X0));
       int gy = yOf(rivHist[i]);
       if (px >= 0) { display.drawLine(px, py, gx, gy, C_BLACK);
-                     display.drawLine(px, py + 1, gx, gy + 1, C_BLACK); }
+                     display.drawLine(px, py + 1, gx, gy + 1, C_BLACK);
+                     display.drawLine(px, py - 1, gx, gy - 1, C_BLACK); }
       px = gx; py = gy;
     }
     display.fillCircle(px, py, 5, C_RED);
+
+    // x axis: the window is exactly 24 h ending at rivAt, so times come from the index
+    for (int k = 0; k <= 4; k++) {
+      int i = k * (rivHistN - 1) / 4;
+      int gx = X0 + (int)((float)i / (rivHistN - 1) * (X1 - X0));
+      time_t tt = rivAt - (time_t)((double)(rivHistN - 1 - i) / (rivHistN - 1) * 86400.0);
+      display.drawFastVLine(gx, Y1 + 1, 5, C_BLACK);
+      struct tm lt; localtime_r(&tt, &lt);
+      char d[8]; strftime(d, sizeof d, "%a", &lt);
+      int hh = lt.tm_hour % 12; if (!hh) hh = 12;
+      char lbl[16]; snprintf(lbl, sizeof lbl, "%s %d%c", d, hh, lt.tm_hour < 12 ? 'a' : 'p');
+      txtC(gx, Y1 + 20, lbl, &FreeSans9pt7b);
+    }
   } else txtC(SCR_W / 2, 340, "no history", &FreeSans12pt7b);
 
   // action + flood are on the chart; the footer only needs the two upper stages (the long
   // version collided with "updated" - photo 6 Oct 2026)
-  footer(String("USGS ") + USGS_SITE + "   updated " + fmtTime(rivAt),
-         "NWS LEMI2   moderate 9.0 ft   major 11.0 ft");
+  footer(String("Des Plaines River near Lemont    USGS ") + USGS_SITE +
+         "    NWSLI LEMI2    updated " + fmtTime(rivAt), "observed, last 24 h");
 }
 void drawQuakes() {
   time_t now; time(&now);
