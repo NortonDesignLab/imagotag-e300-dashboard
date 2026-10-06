@@ -1,17 +1,20 @@
 # v1.0 — A nine-screen information panel built from a retired electronic shelf label
 
 Retailers replace **SES-imagotag / Vusion** shelf labels in bulk, and the retired ones sell for very
-little on eBay. Inside a **7.4" E300** is a genuinely good four-colour e-paper panel — a Pervasive
-Displays **E2741QS0B3** "Spectra 4", 800×480, black/white/red/yellow — that would otherwise be
-e-waste. It needs no adapter and no level shifting: it plugs straight into a stock Waveshare e-Paper
+little on eBay. Inside an **E300 7.4 BWRY** (model EDB2-0740-A) is a genuinely good four-colour
+e-paper panel — a Pervasive Displays **E2741QS0B3** "Spectra 4", 800×480, black/white/red/yellow —
+that would otherwise be e-waste. You do not hack the label: you open it, lift out the original
+board, and plug the panel's own ribbon into a generic driver board. It needs no adapter and no level shifting: it plugs straight into a stock Waveshare e-Paper
 ESP32 driver board and runs from an ESP32-WROOM-32.
 
 This repo turns one into an always-on dashboard that pulls **ten public data sources directly over
 Wi-Fi** — no server, no broker, no cloud account, nothing running on a PC — and rotates through nine
 screens. It ships with a parametric 3D-printed snap-together frame.
 
-**Start here: [docs/E300-7.4-BWRY.md](docs/E300-7.4-BWRY.md)** — wiring, a minimal working sketch,
-and the four things that cost real time.
+**Start here: [docs/E300-7.4-BWRY.md](docs/E300-7.4-BWRY.md)** — how to identify the right unit,
+teardown photos, wiring, a minimal working sketch, and the four things that cost real time.
+
+![the E300's back label](docs/e300-label.jpg)
 
 ---
 
