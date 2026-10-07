@@ -207,6 +207,11 @@ float  rivStage = NAN, rivFlow = NAN, rivFirst = NAN;
 float  rivHist[48]; int rivHistN = 0;
 time_t rivAt = 0;
 const uint32_t RIVER_MS = 15UL * 60 * 1000;
+// USGS/NOAA 503 transiently. A failure at boot used to leave a screen blank until the next full
+// interval - 15 min for the river. Re-attempt in 2 min instead. Due-times are compared as signed
+// differences so millis() rollover is handled.
+const uint32_t RETRY_MS = 2UL * 60 * 1000;
+uint32_t riverDue = 0, quakeDue = 0, spaceDue = 0;
 uint32_t lastRiver = 0;
 
 // ---------------- earthquakes (USGS) ----------------
@@ -1408,8 +1413,8 @@ void drawRiver() {
 
   // action + flood are on the chart; the footer only needs the two upper stages (the long
   // version collided with "updated" - photo 6 Oct 2026)
-  footer(String("Des Plaines River near Lemont    USGS ") + USGS_SITE +
-         "    NWSLI LEMI2    updated " + fmtTime(rivAt), "observed, last 24 h");
+  footer(String("USGS ") + USGS_SITE + "    NWSLI LEMI2    updated " + fmtTime(rivAt),
+         "observed, last 24 h");
 }
 void drawQuakes() {
   time_t now; time(&now);
@@ -2044,9 +2049,9 @@ void setup() {
     delay(400); fetchAlerts();   lastAlert = millis();
     delay(400); fetchNews();     lastNews  = millis();
     delay(400); fetchAir();      lastAir   = millis();
-    delay(400); tryN(fetchRiver,  "river");  lastRiver = millis();
-    delay(400); tryN(fetchQuakes, "quakes"); lastQuake = millis();
-    delay(400); tryN(fetchSpace,  "space");  lastSpace = millis();
+    delay(400); riverDue = millis() + (tryN(fetchRiver,  "river")  ? RIVER_MS : RETRY_MS);
+    delay(400); quakeDue = millis() + (tryN(fetchQuakes, "quakes") ? QUAKE_MS : RETRY_MS);
+    delay(400); spaceDue = millis() + (tryN(fetchSpace,  "space")  ? SPACE_MS : RETRY_MS);
     lastSig = signature(); lastRotate = millis();
     render(ok);
   } else {
@@ -2067,9 +2072,9 @@ void loop() {
   if (!alertTest && now - lastAlert >= ALERT_MS) { fetchAlerts(); lastAlert = now; }
   if (now - lastNews >= NEWS_MS) { fetchNews(); lastNews = now; }
   if (now - lastAir   >= AIR_MS)   { fetchAir();    lastAir   = now; }
-  if (now - lastRiver >= RIVER_MS) { tryN(fetchRiver,  "river");  lastRiver = now; }
-  if (now - lastQuake >= QUAKE_MS) { tryN(fetchQuakes, "quakes"); lastQuake = now; }
-  if (now - lastSpace >= SPACE_MS) { tryN(fetchSpace,  "space");  lastSpace = now; }
+  if ((int32_t)(now - riverDue) >= 0) riverDue = now + (tryN(fetchRiver,  "river")  ? RIVER_MS : RETRY_MS);
+  if ((int32_t)(now - quakeDue) >= 0) quakeDue = now + (tryN(fetchQuakes, "quakes") ? QUAKE_MS : RETRY_MS);
+  if ((int32_t)(now - spaceDue) >= 0) spaceDue = now + (tryN(fetchSpace,  "space")  ? SPACE_MS : RETRY_MS);
   if (now - lastCurrent >= CURRENT_MS) {
     bool ok = tryN(fetchCurrent, "current"); lastCurrent = now;
     String sig = signature();
