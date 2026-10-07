@@ -1,0 +1,15 @@
+# Host-side tooling. Not needed on the ESP32 - this is for generating the printed
+# parts and for flashing/serial capture from the workstation.
+#
+#   python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
+#
+# Note: a venv hard-codes its own absolute path, so moving the project means
+# recreating it. That is how the CAD half went missing once - esptool was
+# reinstalled afterwards but numpy/manifold3d were not, and the STL generators
+# silently stopped working while the committed STLs still looked fine.
+
+numpy            # mesh maths in frame/make_frame.py and frame/openbox/make_box.py
+manifold3d       # solid CSG for the printed frame, enclosure and lid
+matplotlib       # frame/preview.py renders the STL previews
+esptool          # flashing the ESP32
+pyserial         # reset_read.py - pulse reset and capture the boot log
