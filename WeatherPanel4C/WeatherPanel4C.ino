@@ -138,9 +138,9 @@ uint32_t lastComed = 0;
 
 // ---------------- NWS forecast ----------------
 // Free, no key, no special User-Agent needed. The gridpoint is fixed for a location - it came
-// from GET /points/41.8781,-87.6298 -> gridId LOT, gridX 65, gridY 95 (Chicago, IL). Re-derive
-// from /points if SITE_LAT/SITE_LON change. Body is ~13.6 KB, well inside BODY_CAP.
-const char* NWS_URL = "https://api.weather.gov/gridpoints/LOT/76,73/forecast";
+// NWS_GRID (secrets.h) comes from GET /points/<lat>,<lon> -> gridId/gridX/gridY. Re-derive it
+// if SITE_LATITUDE/SITE_LONGITUDE change. Body is ~13.6 KB, well inside BODY_CAP.
+const char* NWS_URL = "https://api.weather.gov/gridpoints/" NWS_GRID "/forecast";
 struct Period { char name[20]; char shortF[48]; char wind[24]; int temp; int pop; bool day; };
 Period  fc[5];
 int     fcN = 0;
@@ -151,11 +151,11 @@ uint32_t lastFc = 0;
 
 // ---------------- pollen + air quality ----------------
 // Pollen: pollen.com by ZIP, free/keyless but REQUIRES a Referer header or it returns nothing.
-//   Index is 0-12 and it names the active triggers. Its /mold/ endpoint returns null for 60606 -
+//   Index is 0-12 and it names the active triggers. Its /mold/ endpoint returns null for some ZIPs -
 //   there is effectively no mold data for this area (NAB counts have no public API).
 // AQI: Open-Meteo air-quality, free/keyless. NOTE its pollen fields are Europe-only and come back
 //   null for US coordinates, which is why pollen comes from pollen.com instead.
-const char* POLLEN_ZIP = "60606";
+const char* POLLEN_ZIP = SITE_ZIP;
 float  pollenIdx = NAN;
 char   pollenTrig[72] = "";
 int    aqiVal = -1;
@@ -195,14 +195,14 @@ const uint32_t NEWS_MS = 30UL * 60 * 1000;
 uint32_t lastNews = 0;
 
 // ---------------- river gauge (USGS) ----------------
-// "Des Plaines River near Chicago, IL", USGS site 05533600. Keyless, 15-minute cadence.
+// RIVER_USGS_SITE from secrets.h (any USGS gauge with gage height). Keyless, 15-minute cadence.
 // 00065 = gage height (ft), 00060 = streamflow (ft3/s).
-// Flood stages from NWS gauge LEMI2 (water.noaa.gov/gauges/lemi2), supplied by Bradley 6 Oct 2026.
-const char* USGS_SITE = "05533600";
-const float FLOOD_ACTION   = 6.5f;   // ft
-const float FLOOD_MINOR    = 7.0f;   // ft - "flood stage"
-const float FLOOD_MODERATE = 9.0f;   // ft
-const float FLOOD_MAJOR    = 11.0f;  // ft
+// Flood stages (ft) from the NWS gauge page water.noaa.gov/gauges/<RIVER_NWSLI>, via secrets.h.
+const char* USGS_SITE = RIVER_USGS_SITE;
+const float FLOOD_ACTION   = RIVER_FLOOD_ACTION;
+const float FLOOD_MINOR    = RIVER_FLOOD_MINOR;     // "flood stage"
+const float FLOOD_MODERATE = RIVER_FLOOD_MODERATE;
+const float FLOOD_MAJOR    = RIVER_FLOOD_MAJOR;
 float  rivStage = NAN, rivFlow = NAN, rivFirst = NAN;
 float  rivHist[48]; int rivHistN = 0;
 time_t rivAt = 0;
@@ -246,7 +246,7 @@ const uint32_t HISTORY_MS = 10UL * 60 * 1000;   // poll history every 10 min
 static const int HIST_MAX   = 60;
 static const int HIST_LIMIT = 48;               // 5-min samples -> 4 h (covers the 3 h trend)
 const float TREND_MB = 0.7f;
-const double SITE_LAT = 41.8781, SITE_LON = -87.6298;   // Chicago, IL - edit if the station moves
+const double SITE_LAT = SITE_LATITUDE, SITE_LON = SITE_LONGITUDE;   // from secrets.h
 
 // ---------------- data ----------------
 struct Obs {
@@ -1316,7 +1316,7 @@ static const char* kpBand(float k) {
 }
 void drawRiver() {
   time_t now; time(&now);
-  header("Des Plaines River", now);
+  header(RIVER_NAME, now);
 
   // yellow from action stage, red from flood (minor) stage
   uint16_t sc = isnan(rivStage) ? C_BLACK : rivStage >= FLOOD_MINOR ? C_RED
@@ -1413,7 +1413,7 @@ void drawRiver() {
 
   // action + flood are on the chart; the footer only needs the two upper stages (the long
   // version collided with "updated" - photo 6 Oct 2026)
-  footer(String("USGS ") + USGS_SITE + "    NWSLI LEMI2    updated " + fmtTime(rivAt),
+  footer(String("USGS ") + USGS_SITE + "    NWSLI " RIVER_NWSLI "    updated " + fmtTime(rivAt),
          "observed, last 24 h");
 }
 void drawQuakes() {
@@ -1612,7 +1612,7 @@ void drawForecast() {
   int dn = wrapText(fcDetail, &FreeSans12pt7b, 1, SCR_W - 2 * M, dl, 4);
   for (int k = 0; k < dn; k++) txt(M, 344 + k * 24, dl[k], &FreeSans12pt7b);
 
-  footer("api.weather.gov    updated " + fmtTime(fcAt), "Chicago, IL   grid LOT 76,73");
+  footer("api.weather.gov    updated " + fmtTime(fcAt), SITE_NAME "   grid " NWS_GRID);
 }
 
 // ---------------- ComEd drawing ----------------

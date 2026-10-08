@@ -76,7 +76,8 @@ electricity every 5, weather and quotes every 10, river and quakes every 15, the
 | `WeatherEpaper/` | Tri-colour sibling on a GDEH075Z90 880×528 panel, via GxEPD2 |
 | `frame/` | Parametric snap-together 3-part frame with a driver-board enclosure |
 
-Credentials, station name **and portfolio positions** all live in `secrets.h`, which is gitignored.
+Credentials, station name, **site location** (coordinates, NWS grid, pollen ZIP, river gauge and
+flood stages) **and portfolio positions** all live in `secrets.h`, which is gitignored.
 Copy `secrets.h.example` — it ships with a demo portfolio of five index ETFs so the Portfolio screen
 works immediately.
 

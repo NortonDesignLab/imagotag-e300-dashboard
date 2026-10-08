@@ -78,9 +78,9 @@ uint32_t lastComed = 0;
 
 // ---------------- NWS forecast ----------------
 // Free, no key, no special User-Agent needed. The gridpoint is fixed for a location - it came
-// from GET /points/41.8781,-87.6298 -> gridId LOT, gridX 65, gridY 95 (Chicago, IL). Re-derive
-// from /points if SITE_LAT/SITE_LON change. Body is ~13.6 KB, well inside BODY_CAP.
-const char* NWS_URL = "https://api.weather.gov/gridpoints/LOT/76,73/forecast";
+// NWS_GRID (secrets.h) comes from GET /points/<lat>,<lon> -> gridId/gridX/gridY. Re-derive it
+// if SITE_LATITUDE/SITE_LONGITUDE change. Body is ~13.6 KB, well inside BODY_CAP.
+const char* NWS_URL = "https://api.weather.gov/gridpoints/" NWS_GRID "/forecast";
 struct Period { char name[20]; char shortF[48]; char wind[24]; int temp; int pop; bool day; };
 Period  fc[5];
 int     fcN = 0;
@@ -91,11 +91,11 @@ uint32_t lastFc = 0;
 
 // ---------------- pollen + air quality ----------------
 // Pollen: pollen.com by ZIP, free/keyless but REQUIRES a Referer header or it returns nothing.
-//   Index is 0-12 and it names the active triggers. Its /mold/ endpoint returns null for 60606 -
+//   Index is 0-12 and it names the active triggers. Its /mold/ endpoint returns null for some ZIPs -
 //   there is effectively no mold data for this area (NAB counts have no public API).
 // AQI: Open-Meteo air-quality, free/keyless. NOTE its pollen fields are Europe-only and come back
 //   null for US coordinates, which is why pollen comes from pollen.com instead.
-const char* POLLEN_ZIP = "60606";
+const char* POLLEN_ZIP = SITE_ZIP;
 float  pollenIdx = NAN;
 char   pollenTrig[72] = "";
 int    aqiVal = -1;
@@ -135,14 +135,12 @@ const uint32_t NEWS_MS = 30UL * 60 * 1000;
 uint32_t lastNews = 0;
 
 // ---------------- river gauge (USGS) ----------------
-// "Des Plaines River near Chicago, IL", USGS site 05533600. Keyless, 15-minute cadence.
+// RIVER_USGS_SITE from secrets.h (any USGS gauge with gage height). Keyless, 15-minute cadence.
 // 00065 = gage height (ft), 00060 = streamflow (ft3/s).
-// FLOOD STAGES ARE DELIBERATELY UNSET. NWS publishes them per forecast point, but none of the
-// candidate NWPS gauge IDs resolved, and guessing a flood threshold on a flood display is worse
-// than showing none. Fill these in from the NWS AHPS page for this gauge and the marker appears.
-const char* USGS_SITE = "05533600";
-const float FLOOD_ACTION = 6.5f;     // ft - NWS LEMI2 (Bradley, 6 Oct 2026); not yet reflashed
-const float FLOOD_MINOR  = 7.0f;     // ft - moderate 9.0, major 11.0
+// Flood stages (ft) from the NWS gauge page water.noaa.gov/gauges/<RIVER_NWSLI>, via secrets.h.
+const char* USGS_SITE = RIVER_USGS_SITE;
+const float FLOOD_ACTION = RIVER_FLOOD_ACTION;
+const float FLOOD_MINOR  = RIVER_FLOOD_MINOR;     // "flood stage"
 float  rivStage = NAN, rivFlow = NAN, rivFirst = NAN;
 float  rivHist[48]; int rivHistN = 0;
 time_t rivAt = 0;
@@ -195,7 +193,7 @@ const uint32_t HISTORY_MS = 10UL * 60 * 1000;   // poll history every 10 min
 static const int HIST_MAX   = 60;
 static const int HIST_LIMIT = 48;               // 5-min samples -> 4 h (covers the 3 h trend)
 const float TREND_MB = 0.7f;
-const double SITE_LAT = 41.8781, SITE_LON = -87.6298;   // Chicago, IL - edit if the station moves
+const double SITE_LAT = SITE_LATITUDE, SITE_LON = SITE_LONGITUDE;   // from secrets.h
 
 // ---------------- data ----------------
 struct Obs {
@@ -1257,7 +1255,7 @@ void drawRiver() {
   time_t now; time(&now);
   display.fillScreen(GxEPD_WHITE);
   display.setTextWrap(false);
-  txt(24, 52, "Des Plaines River", &FreeSansBold24pt7b);
+  txt(24, 52, RIVER_NAME, &FreeSansBold24pt7b);
   txtR(SCR_W - 24, 52, fmtTime(now, "%a %b %e   %l:%M %p"), &FreeSans12pt7b);
   display.fillRect(24, 68, SCR_W - 48, 3, GxEPD_BLACK);
 
@@ -1534,7 +1532,7 @@ void drawForecast() {
   for (int k = 0; k < dn; k++) txt(24, 378 + k * 26, dl[k], &FreeSans12pt7b);
 
   txt(24, SCR_H - 14, "api.weather.gov    updated " + fmtTime(fcAt), &FreeSans9pt7b);
-  txtR(SCR_W - 24, SCR_H - 14, "Chicago, IL   grid LOT 76,73", &FreeSans9pt7b);
+  txtR(SCR_W - 24, SCR_H - 14, SITE_NAME "   grid " NWS_GRID, &FreeSans9pt7b);
 }
 
 // ---------------- ComEd drawing ----------------
