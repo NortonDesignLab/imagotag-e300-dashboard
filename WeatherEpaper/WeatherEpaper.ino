@@ -165,12 +165,18 @@ uint32_t lastSpace = 0;
 enum Screen { SCR_WEATHER = 0, SCR_FORECAST = 1, SCR_AIR = 2, SCR_RIVER = 3, SCR_SPACE = 4,
               SCR_QUAKE = 5, SCR_PORTFOLIO = 6, SCR_COMED = 7, SCR_NEWS = 8 };
 const int NUM_SCREENS = 9;
-// Station weather gets every 3rd slot; the other screens fill the gaps in order. Full cycle is
-// 12 slots (8 others + 4 weather), so weather returns every 3 slots and the rest every 12.
-const Screen OTHERS[] = { SCR_FORECAST, SCR_AIR, SCR_RIVER, SCR_SPACE,
-                          SCR_QUAKE, SCR_PORTFOLIO, SCR_COMED, SCR_NEWS };
+// Station weather gets every 3rd slot; the other screens fill the gaps in order.
+// 7 Oct 2026 (Bradley): this panel shows only weather, forecast and pollen - a 9 min cycle at
+// 3 min per screen. The other six screens still exist and can be shown with /screen?s=..., but
+// their feeds are not polled unless one is in OTHERS or currently on the panel (see inRotation).
+const Screen OTHERS[] = { SCR_FORECAST, SCR_AIR };
 const int NOTHER = sizeof(OTHERS) / sizeof(OTHERS[0]);
 int rotSlot = 0, otherIdx = 0;
+static bool inRotation(Screen v) {
+  if (v == SCR_WEATHER) return true;
+  for (int i = 0; i < NOTHER; i++) if (OTHERS[i] == v) return true;
+  return false;
+}
 Screen   curScreen = SCR_WEATHER;
 uint32_t rotateMs  = 3UL * 60 * 1000;           // 0 = stay on the current screen
 uint32_t lastRotate = 0;
@@ -1804,6 +1810,22 @@ textarea,input,select,button{width:100%;font-size:1.05em;margin:.35em 0;box-sizi
 <form method=post action=/screen><input type=hidden name=s value=quake><button>Show earthquakes now</button></form>
 <form method=post action=/rotate><label>Rotate every N minutes (0 = off)</label><input name=min type=number value=3 min=0><button>Set rotation</button></form></body></html>)HTML";
 
+// A screen's feed is polled while it is in the rotation or is the one on the panel right now.
+static bool wanted(Screen v) { return inRotation(v) || curScreen == v; }
+// /screen?s=... can show a retired screen; fetch its data first if it has never been fetched
+// or is older than its normal poll interval, so the jump does not paint stale or empty data.
+static void fetchIfStale(Screen v) {
+  uint32_t now = millis();
+  switch (v) {
+    case SCR_PORTFOLIO: if (!lastQuotes || now - lastQuotes >= QUOTES_MS) { fetchQuotes(); lastQuotes = now; } break;
+    case SCR_COMED:     if (!lastComed  || now - lastComed  >= COMED_MS)  { fetchComEd();  lastComed  = now; } break;
+    case SCR_NEWS:      if (!lastNews   || now - lastNews   >= NEWS_MS)   { fetchNews();   lastNews   = now; } break;
+    case SCR_RIVER:     if (!lastRiver  || now - lastRiver  >= RIVER_MS)  { tryN(fetchRiver,  "river");  lastRiver = now; } break;
+    case SCR_QUAKE:     if (!lastQuake  || now - lastQuake  >= QUAKE_MS)  { tryN(fetchQuakes, "quakes"); lastQuake = now; } break;
+    case SCR_SPACE:     if (!lastSpace  || now - lastSpace  >= SPACE_MS)  { tryN(fetchSpace,  "space");  lastSpace = now; } break;
+    default: break;
+  }
+}
 static const char* screenName(Screen v) {
   switch (v) {
     case SCR_FORECAST:  return "forecast";
@@ -1817,10 +1839,15 @@ static const char* screenName(Screen v) {
     default:            return "weather";
   }
 }
+static String rotationText() {           // "weather, forecast, air" in the order they appear
+  String t = "weather";
+  for (int i = 0; i < NOTHER; i++) { t += ", "; t += screenName(OTHERS[i]); if (i % 2 == 1 && i + 1 < NOTHER) t += ", weather"; }
+  return t;
+}
 static String statusLine() {
   String base = String("Screen: ") + (screenName(curScreen)) +
-                (rotateMs ? "  (rotating every " + String(rotateMs / 60000) + " min, weather every 3rd)" : "  (rotation off)") +
-                "  |  quotes " + String(quotesOk) + "/" + String(NHOLD) +
+                (rotateMs ? "  (rotating every " + String(rotateMs / 60000) + " min: " + rotationText() + ")" : "  (rotation off)") +
+                (wanted(SCR_PORTFOLIO) ? "  |  quotes " + String(quotesOk) + "/" + String(NHOLD) : String("")) +
                 "  |  today hi " + (isnan(dayHi) ? String("--") : f1(dayHi) + " at " + fmtTime(dayHiT)) +
                 ", lo " + (isnan(dayLo) ? String("--") : f1(dayLo) + " at " + fmtTime(dayLoT)) +
                 (alertLive() ? String("  |  *** ") + alertEvent + " (" + alertArea + ") until " + fmtTime(alertEnds)
@@ -1873,6 +1900,7 @@ static void startWeb() {
     else if (w == "space")     curScreen = SCR_SPACE;
     else if (w == "weather")   curScreen = SCR_WEATHER;
     else { server.send(400, "text/plain", "s=weather|forecast|air|river|space|quake|portfolio|comed|news\n"); return; }
+    if (!inRotation(curScreen)) fetchIfStale(curScreen);
     lastRotate = millis(); needRender = true; wantsHtmlRedirect();
   });
   server.on("/testalert", [](){      // verify the red box without waiting for a storm
@@ -1948,15 +1976,15 @@ void setup() {
     tryN(fetchHistory, "history"); lastHistory = millis();
     bool ok = tryN(fetchCurrent, "current"); lastCurrent = millis();
     backfillDayHiLo();
-    fetchQuotes(); lastQuotes = millis();
-    fetchComEd();  lastComed  = millis();
+    if (inRotation(SCR_PORTFOLIO)) { fetchQuotes(); lastQuotes = millis(); }
+    if (inRotation(SCR_COMED))     { fetchComEd();  lastComed  = millis(); }
     delay(400); fetchForecast(); lastFc = millis();
     delay(400); fetchAlerts();   lastAlert = millis();
-    delay(400); fetchNews();     lastNews  = millis();
+    if (inRotation(SCR_NEWS))  { delay(400); fetchNews(); lastNews = millis(); }
     delay(400); fetchAir();      lastAir   = millis();
-    delay(400); tryN(fetchRiver,  "river");  lastRiver = millis();
-    delay(400); tryN(fetchQuakes, "quakes"); lastQuake = millis();
-    delay(400); tryN(fetchSpace,  "space");  lastSpace = millis();
+    if (inRotation(SCR_RIVER)) { delay(400); tryN(fetchRiver,  "river");  lastRiver = millis(); }
+    if (inRotation(SCR_QUAKE)) { delay(400); tryN(fetchQuakes, "quakes"); lastQuake = millis(); }
+    if (inRotation(SCR_SPACE)) { delay(400); tryN(fetchSpace,  "space");  lastSpace = millis(); }
     lastSig = signature(); lastRotate = millis();
     render(ok);
   } else {
@@ -1970,16 +1998,16 @@ void loop() {
   if (msgText.length() && msgTtlMs && now - msgSetMs >= msgTtlMs) { msgText = ""; needRender = true; Serial.println("message expired"); }
   if (needRender) { needRender = false; lastSig = signature(); render(lastRenderOk); }
   if (now - lastHistory >= HISTORY_MS) { tryN(fetchHistory, "history"); lastHistory = now; }
-  if (now - lastQuotes  >= QUOTES_MS)  { fetchQuotes();                  lastQuotes  = now; }
-  if (now - lastComed   >= COMED_MS)   { fetchComEd();                   lastComed   = now; }
+  if (wanted(SCR_PORTFOLIO) && now - lastQuotes >= QUOTES_MS) { fetchQuotes(); lastQuotes = now; }
+  if (wanted(SCR_COMED)     && now - lastComed  >= COMED_MS)  { fetchComEd();  lastComed  = now; }
   if (now - lastFc      >= FC_MS)      { fetchForecast();                lastFc      = now; }
   if (alertTest && !alertLive()) { alertTest = false; alertActive = false; needRender = true; Serial.println("test alert expired"); }
   if (!alertTest && now - lastAlert >= ALERT_MS) { fetchAlerts(); lastAlert = now; }
-  if (now - lastNews >= NEWS_MS) { fetchNews(); lastNews = now; }
+  if (wanted(SCR_NEWS) && now - lastNews >= NEWS_MS) { fetchNews(); lastNews = now; }
   if (now - lastAir   >= AIR_MS)   { fetchAir();    lastAir   = now; }
-  if (now - lastRiver >= RIVER_MS) { tryN(fetchRiver,  "river");  lastRiver = now; }
-  if (now - lastQuake >= QUAKE_MS) { tryN(fetchQuakes, "quakes"); lastQuake = now; }
-  if (now - lastSpace >= SPACE_MS) { tryN(fetchSpace,  "space");  lastSpace = now; }
+  if (wanted(SCR_RIVER) && now - lastRiver >= RIVER_MS) { tryN(fetchRiver,  "river");  lastRiver = now; }
+  if (wanted(SCR_QUAKE) && now - lastQuake >= QUAKE_MS) { tryN(fetchQuakes, "quakes"); lastQuake = now; }
+  if (wanted(SCR_SPACE) && now - lastSpace >= SPACE_MS) { tryN(fetchSpace,  "space");  lastSpace = now; }
   if (now - lastCurrent >= CURRENT_MS) {
     bool ok = tryN(fetchCurrent, "current"); lastCurrent = now;
     String sig = signature();
