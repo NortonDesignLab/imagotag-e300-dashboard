@@ -1,7 +1,8 @@
-// Weather station display, 4-COLOR edition: Waveshare e-Paper ESP32 Driver Board (Rev3,
-// ESP32-WROOM-32E, the SECOND board, CH343 serial 5B14073256) driving the Imagotag/Vusion E300 7.4"
-// panel = Pervasive Displays E2741QS0B3, Spectra 4 black/white/RED/YELLOW, 480x800 native, used in
-// LANDSCAPE 800x480 (bb_epaper rotation 90).
+// Weather station display, 4-COLOR edition, driving the Imagotag/Vusion E300 7.4" panel =
+// Pervasive Displays E2741QS0B3, Spectra 4 black/white/RED/YELLOW, 480x800 native, used in
+// LANDSCAPE 800x480 (bb_epaper rotation 90). Runs on either of two driver boards (see the board
+// select below): the Waveshare e-Paper ESP32 Driver Board Rev3 (ESP32-WROOM-32E) or the Seeed XIAO
+// ePaper Display Board EE04 with a XIAO ESP32-S3 Plus.
 //
 // Port of WeatherEpaper (GxEPD2, 880x528 B/W/R) to bb_epaper. The fetch/parse half (AWN, Yahoo,
 // ComEd, NWS, pollen.com, Open-Meteo, USGS, SWPC, Google News) is reused verbatim. The drawing half
@@ -16,7 +17,8 @@
 // (see EpdGfx / pushScreen). bb_epaper is used for init, commands, refresh and sleep only.
 // bb_epaper rejects any rect with a corner off-screen and does not clip x, so the bridge clips.
 //
-// Pins (board-fixed): BUSY=25 RST=26 DC=27 CS=15 CLK=13 DIN=14. Full refresh ~23 s, no fast mode.
+// Full refresh ~23 s, no fast mode. The paged renderer is kept on the S3 too (it has the RAM for a
+// full frame, but paging costs nothing and keeps one code path).
 // Needs bb_epaper from GIT master (EP74YR_480x800): compile with --library ../bb_epaper_git.
 
 #include <WiFi.h>
@@ -35,14 +37,32 @@
 #include <WebServer.h>
 #include <ESPmDNS.h>
 
+// Board select. The same sketch runs on two driver boards; the pins and the mDNS hostname are the
+// only differences (the hostname differs so both boards can be on the LAN at once).
+#if defined(ARDUINO_XIAO_ESP32S3_PLUS) || defined(ARDUINO_XIAO_ESP32S3)
+// Seeed XIAO ePaper Display Board EE04 + XIAO ESP32-S3 Plus (16 MB flash, 8 MB PSRAM).
+// FQBN esp32:esp32:XIAO_ESP32S3_Plus:PSRAM=opi,PartitionScheme=app3M_fat9M_16MB
+#define BOARD_NAME "XIAO EE04 / ESP32-S3 Plus"
+#define DC_PIN    10
+#define RESET_PIN 38
+#define BUSY_PIN  4
+#define CS_PIN    44
+#define SCK_PIN   7
+#define MOSI_PIN  9
+#define HOSTNAME  "ndl-panel-s3"
+#else
+// Waveshare e-Paper ESP32 Driver Board Rev3 (ESP32-WROOM-32E, 4 MB flash, no PSRAM).
+// FQBN esp32:esp32:esp32:FlashSize=4M,PartitionScheme=huge_app
+#define BOARD_NAME "Waveshare Rev3 / WROOM-32"
 #define DC_PIN    27
 #define RESET_PIN 26
 #define BUSY_PIN  25
 #define CS_PIN    15
 #define SCK_PIN   13
 #define MOSI_PIN  14
-#define ROTATION  90          // 270 flips the picture 180 degrees
 #define HOSTNAME  "ndl-panel"
+#endif
+#define ROTATION  90          // 270 flips the picture 180 degrees
 #define SCR_W 800
 #define SCR_H 480
 
@@ -2019,7 +2039,7 @@ uint32_t lastCurrent = 0, lastHistory = 0;
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("\nWeatherPanel4C starting (E2741QS0B3 BWRY, bb_epaper EP74YR_480x800, landscape 800x480)");
+  Serial.println("\nWeatherPanel4C starting (E2741QS0B3 BWRY, bb_epaper EP74YR_480x800, landscape 800x480) on " BOARD_NAME);
 
   for (int i = 0; i < 24; i++) comedHour[i] = NAN;   // zero-init would draw 24 bogus 0.0c bars
 

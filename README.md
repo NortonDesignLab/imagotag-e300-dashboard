@@ -5,7 +5,8 @@ little on eBay. Inside an **E300 7.4 BWRY** (model EDB2-0740-A) is a genuinely g
 e-paper panel — a Pervasive Displays **E2741QS0B3** "Spectra 4", 800×480, black/white/red/yellow —
 that would otherwise be e-waste. You do not hack the label: you open it, lift out the original
 board, and plug the panel's own ribbon into a generic driver board. It needs no adapter and no level shifting: it plugs straight into a stock Waveshare e-Paper
-ESP32 driver board and runs from an ESP32-WROOM-32.
+ESP32 driver board and runs from an ESP32-WROOM-32, or into a Seeed XIAO ePaper Display Board
+EE04 with a XIAO ESP32-S3 Plus. The same sketch builds for either.
 
 This repo turns one into an always-on dashboard that pulls **ten public data sources directly over
 Wi-Fi** — no server, no broker, no cloud account, nothing running on a PC — and rotates through nine
@@ -114,12 +115,23 @@ The parts that cost hours and are not findable by searching:
 
 ## Requirements
 
-Waveshare e-Paper ESP32 Driver Board (Rev3) · an E300 7.4" BWRY panel (E2741QS0B3) ·
-`arduino-cli` with esp32 core 3.3.11 · **`bb_epaper` from git master** (for `EP74YR_480x800`) ·
-Adafruit GFX · ArduinoJson 7.4.3 · 2.4 GHz Wi-Fi
+One of two driver boards (the sketch picks its pins and hostname from the board macro):
 
-Build with `PartitionScheme=huge_app`; the default 1.3 MB app partition runs out around the fourth
-screen. Current build is 41% of flash and 33% of RAM.
+- **Waveshare e-Paper ESP32 Driver Board (Rev3)**, ESP32-WROOM-32E, 4 MB flash, no PSRAM.
+  Hostname `ndl-panel`. Build with
+  `--fqbn esp32:esp32:esp32:FlashSize=4M,PartitionScheme=huge_app`; the default 1.3 MB app
+  partition runs out around the fourth screen. 41% of flash, 33% of RAM.
+- **Seeed XIAO ePaper Display Board EE04** with a **XIAO ESP32-S3 Plus**, 16 MB flash, 8 MB PSRAM,
+  24-pin FPC, three keys and a LiPo connector. Hostname `ndl-panel-s3`. Build with
+  `--fqbn esp32:esp32:XIAO_ESP32S3_Plus:PSRAM=opi,PartitionScheme=app3M_fat9M_16MB`. 40% of flash.
+  The S3 has room for the full frame buffer, but the band-paged renderer is kept so there is one
+  code path. Pins: DC 10, RST 38, BUSY 4, CS 44, SCK 7, MOSI 9.
+
+plus an E300 7.4" BWRY panel (E2741QS0B3) · `arduino-cli` with esp32 core 3.3.11 ·
+**`bb_epaper` from git master** (for `EP74YR_480x800`) · Adafruit GFX · ArduinoJson 7.4.3 ·
+2.4 GHz Wi-Fi
+
+    arduino-cli compile --fqbn <fqbn above> --library bb_epaper_git WeatherPanel4C
 
 ## Roadmap
 
