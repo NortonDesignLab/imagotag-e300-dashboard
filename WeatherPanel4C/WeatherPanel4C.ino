@@ -4,11 +4,11 @@
 // select below): the Waveshare e-Paper ESP32 Driver Board Rev3 (ESP32-WROOM-32E) or the Seeed XIAO
 // ePaper Display Board EE04 with a XIAO ESP32-S3 Plus.
 //
-// Port of WeatherEpaper (GxEPD2, 880x528 B/W/R) to bb_epaper. The fetch/parse half (AWN, Yahoo,
+// Port of WeatherEpaper (GxEPD2, 880x528 B/W/R) to bb_epaper. The fetch/parse half (AWN,
 // ComEd, NWS, pollen.com, Open-Meteo, USGS, SWPC, Google News) is reused verbatim. The drawing half
 // is re-laid out for 800x480 and gains yellow as a "caution" tier between black and red:
 //   UV 3-5, pollen/asthma Medium, AQI 51-100, Kp 4, M5 quakes, lightning today but not in the last
-//   hour, MARKET CLOSED (prices not live), the ComEd hour still in progress; messages take ~yellow~.
+//   hour, the ComEd hour still in progress; messages take ~yellow~.
 // Yellow text is ringed in black (same trick as the NDL panel) because yellow on white is faint,
 // and is never used below 12 pt.
 //
@@ -115,39 +115,14 @@ bool     msgFull    = false;       // full screen vs banner strip
 uint32_t msgSetMs   = 0, msgTtlMs = 0;
 bool     needRender = false;
 
-// ---------------- portfolio ----------------
-// Holdings, cash and treasury come from secrets.h (gitignored) so personal positions stay
-// out of the repo - see secrets.h.example for the format. Prices are fetched live from Yahoo.
-struct Holding { const char* sym; float qty; float cost; float price; float prev; time_t at; };
-Holding HOLD[] = { PORTFOLIO_HOLDINGS };
-const int NHOLD = sizeof(HOLD)/sizeof(HOLD[0]);
-float CASH_USD     = PORTFOLIO_CASH;       // settlement / sweep balance
-// Listed at $1.00/unit with zero gain, and its "percent of account" reads 100%, so it sits in a
-// separate account. Shown as its own row but EXCLUDED from the total (Bradley, 29 Sep 2026).
-float TREASURY_USD = PORTFOLIO_TREASURY;   // separate account: shown as a row, excluded from the total
-// Market context shown under the holdings. '^' must be %5E-encoded in the URL.
-struct Idx { const char* label; const char* path; int dec; bool pctUnit; float price; float prev; };
-Idx IDX[] = {
-  {"S&P",  "%5EGSPC", 0, false, 0, 0},
-  {"NASD", "%5EIXIC", 0, false, 0, 0},
-  {"VIX",  "%5EVIX",  1, false, 0, 0},
-  {"10YR", "%5ETNX",  2, true,  0, 0},   // ^TNX is already a yield in percent
-  {"GOLD", "GC=F",    0, false, 0, 0},   // COMEX gold future
-};
-const int NIDX = sizeof(IDX)/sizeof(IDX[0]);
-int idxOk = 0;
-
-const uint32_t QUOTES_MS = 10UL * 60 * 1000;
-uint32_t lastQuotes = 0;
-int      quotesOk = 0;
-time_t   quoteAt = 0;
-
 // ---------------- ComEd hourly pricing ----------------
 // northern Illinois. Free, no key. Two calls:
 //   ?type=currenthouraverage -> JSON [{millisUTC,price}]  (45 B)
 //   ?type=day&date=YYYYMMDD  -> JavaScript, NOT JSON: [[Date.UTC(y,m,d,H,0,0), price], ...]  (~550 B)
-// The Date.UTC() hours are LOCAL clock hours despite the name (verified: 16 entries at 16:07 CDT),
-// so H indexes straight into a local 0..23 array with no timezone maths.
+// The Date.UTC() hours are LOCAL clock hours despite the name, and they are HOUR-ENDING: H = the
+// hour that ended at H:00 (verified 26 Oct 2026: entry 18 = 17.5c = the mean of the 5-minute
+// prices from 5-6 PM CDT). So H goes into slot H-1 of a local 0..23 hour-starting array; H = 0 is
+// yesterday's 11 PM hour and is dropped. The hour in progress is never in the feed.
 const float ALERT_C = 8.0f;              // cents/kWh: at or above this is drawn red
 float  comedHour[24];
 float  comedCur = NAN;
@@ -248,14 +223,13 @@ uint32_t lastSpace = 0;
 
 // ---------------- screen rotation ----------------
 enum Screen { SCR_WEATHER = 0, SCR_FORECAST = 1, SCR_AIR = 2, SCR_RIVER = 3, SCR_SPACE = 4,
-              SCR_QUAKE = 5, SCR_PORTFOLIO = 6, SCR_COMED = 7, SCR_NEWS = 8 };
-const int NUM_SCREENS = 9;
-// Station weather gets every 3rd slot; the other screens fill the gaps in order. Full cycle is
-// 12 slots (8 others + 4 weather), so weather returns every 3 slots and the rest every 12.
-const Screen OTHERS[] = { SCR_FORECAST, SCR_AIR, SCR_RIVER, SCR_SPACE,
-                          SCR_QUAKE, SCR_PORTFOLIO, SCR_COMED, SCR_NEWS };
-const int NOTHER = sizeof(OTHERS) / sizeof(OTHERS[0]);
-int rotSlot = 0, otherIdx = 0;
+              SCR_QUAKE = 5, SCR_COMED = 6, SCR_NEWS = 7 };
+const int NUM_SCREENS = 8;
+// Rotation is these five in order (Bradley, 27 Oct 2026). Space, quake and news are still
+// compiled and reachable with /screen?s=..., just not in the cycle.
+const Screen CYCLE[] = { SCR_WEATHER, SCR_FORECAST, SCR_COMED, SCR_AIR, SCR_RIVER };
+const int NCYCLE = sizeof(CYCLE) / sizeof(CYCLE[0]);
+int rotSlot = 0;
 Screen   curScreen = SCR_WEATHER;
 uint32_t rotateMs  = 3UL * 60 * 1000;           // 0 = stay on the current screen
 uint32_t lastRotate = 0;
@@ -321,7 +295,7 @@ static bool httpGetRaw(const String& url, size_t& outLen, size_t maxBytes = BODY
   HTTPClient https;
   https.useHTTP10(true);
   https.setTimeout(15000);
-  https.setUserAgent("Mozilla/5.0 (X11; Linux x86_64)");   // Yahoo 404s the default ESP32 UA
+  https.setUserAgent("Mozilla/5.0 (X11; Linux x86_64)");   // some feeds reject the default ESP32 UA
   if (!https.begin(client, url)) { lastErr = "begin failed"; return false; }
   if (referer) https.addHeader("Referer", referer);   // pollen.com returns nothing without it
   int code = https.GET();
@@ -520,53 +494,6 @@ bool fetchHistory() {
   if (!cur.ok) { parseObs(arr[0]); time(&lastGood); }
   computeTrend(); lastErr = ""; return true;
 }
-// ---------------- quotes (Yahoo chart API, keyless) ----------------
-// range=1d matters: chartPreviousClose is the close before the RANGE, so a 5d range would
-// give a 5-day-old baseline and wrong day changes.
-bool fetchQuotes() {
-  JsonDocument filter;
-  JsonObject m = filter["chart"]["result"][0].to<JsonObject>()["meta"].to<JsonObject>();
-  m["regularMarketPrice"] = true; m["chartPreviousClose"] = true; m["regularMarketTime"] = true;
-  int ok = 0;
-  for (int i = 0; i < NHOLD; i++) {
-    String url = String("https://query1.finance.yahoo.com/v8/finance/chart/") + HOLD[i].sym +
-                 "?interval=1d&range=1d";
-    JsonDocument doc;
-    if (!awGet(url, doc, filter)) { Serial.printf("  quote %s FAILED (%s)\n", HOLD[i].sym, lastErr.c_str()); continue; }
-    JsonObject meta = doc["chart"]["result"][0]["meta"];
-    float px = meta["regularMarketPrice"] | NAN;
-    float pc = meta["chartPreviousClose"] | NAN;
-    if (isnan(px) || px <= 0) { Serial.printf("  quote %s: no price\n", HOLD[i].sym); continue; }
-    HOLD[i].price = px;                                   // keep last good on failure
-    if (!isnan(pc) && pc > 0) HOLD[i].prev = pc;
-    HOLD[i].at = (time_t)(meta["regularMarketTime"] | 0);
-    if (HOLD[i].at > quoteAt) quoteAt = HOLD[i].at;
-    ok++;
-    delay(120);                                           // be polite to Yahoo
-  }
-  quotesOk = ok;
-  Serial.printf("quotes: %d/%d ok\n", ok, NHOLD);
-
-  int iok = 0;                                   // market context indices
-  for (int i = 0; i < NIDX; i++) {
-    String url = String("https://query1.finance.yahoo.com/v8/finance/chart/") + IDX[i].path +
-                 "?interval=1d&range=1d";
-    JsonDocument doc;
-    if (!awGet(url, doc, filter)) continue;
-    JsonObject meta = doc["chart"]["result"][0]["meta"];
-    float px = meta["regularMarketPrice"] | NAN;
-    float pc = meta["chartPreviousClose"] | NAN;
-    if (isnan(px) || px <= 0) continue;
-    IDX[i].price = px;
-    if (!isnan(pc) && pc > 0) IDX[i].prev = pc;
-    iok++;
-    delay(120);
-  }
-  idxOk = iok;
-  Serial.printf("indices: %d/%d ok\n", iok, NIDX);
-  return ok > 0;
-}
-
 // ---------------- river / quakes / space weather fetches ----------------
 bool fetchRiver() {
   char url[256];
@@ -950,7 +877,8 @@ bool fetchComEd() {
       if (sscanf(q, "%d,%d,%d,%d,%d,%d", &y, &mo, &d, &h, &mi, &se) == 6) {
         const char* r = strchr(q, ')');
         if (r) { r++; while (*r == ',' || *r == ' ') r++;
-                 if (h >= 0 && h < 24) { comedHour[h] = atof(r); comedN++; } }
+                 int slot = h - 1;              // hour-ending -> hour-starting
+                 if (slot >= 0 && slot < 24) { comedHour[slot] = atof(r); comedN++; } }
       }
     }
     Serial.printf("ComEd: cur %.1fc, %d hourly averages today\n", comedCur, comedN);
@@ -1055,7 +983,7 @@ static void header(const String& title, time_t now, bool eastern = false) {
   display.fillScreen(C_WHITE);
   display.setTextWrap(false);          // never wrap: an overflowing label would orphan chars at x=0
   txt(M, 46, title, &FreeSansBold24pt7b);
-  // Portfolio / news run on EASTERN (market time, and Bradley's clients' zone); ET = CT + 1 h year round.
+  // News runs on EASTERN (market time, and Bradley's clients' zone); ET = CT + 1 h year round.
   txtR(SCR_W - M, 46, eastern ? fmtTime(now + 3600, "%a %b %e   %l:%M %p") + " ET"
                                : fmtTime(now, "%a %b %e   %l:%M %p"), &FreeSans12pt7b);
   display.fillRect(M, 60, SCR_W - 2 * M, 3, C_BLACK);
@@ -1178,129 +1106,12 @@ static void drawBannerMessage() {
   txtR(bx + bw - 10, by + bh - 8, msgExpiryText(), &FreeSans9pt7b, C_RED);
 }
 
-// ---------------- portfolio drawing ----------------
-static String f2(float v){ char b[16]; if(isnan(v)) return "--"; snprintf(b,sizeof b,"%.2f",v); return String(b); }
+// Thousands separators, used by the river (streamflow) and quake (distance) screens.
 static String grpAbs(double v){                     // 1234567 -> "1,234,567"
   char b[24]; snprintf(b,sizeof b,"%ld",(long)llround(fabs(v)));
   String d(b), o; int c=0;
   for (int i=d.length()-1;i>=0;i--){ o = String(d[i]) + o; if(++c%3==0 && i>0) o = "," + o; }
   return o;
-}
-static String usd (double v){ return String(v<0?"-$":"$") + grpAbs(v); }
-static String usdS(double v){ return String(v<0?"-$":"+$") + grpAbs(v); }
-static String pctS(double v){ char b[16]; if (fabs(v) < 0.005) return String("0.00%");   // -0.09 on $80k is flat, not a loss
-  snprintf(b,sizeof b,"%+.2f%%",v); return String(b); }
-// US equity session: 9:30-16:00 ET = 8:30-15:00 CT (both observe DST, so the offset is constant).
-// No holiday table needed: on a holiday the ETF quotes never refresh, so the staleness check
-// below catches it and correctly reports CLOSED.
-static bool marketOpen() {
-  time_t now; time(&now);
-  struct tm lt; localtime_r(&now, &lt);
-  if (lt.tm_wday == 0 || lt.tm_wday == 6) return false;
-  int mins = lt.tm_hour * 60 + lt.tm_min;
-  if (mins < 8 * 60 + 30 || mins >= 15 * 60) return false;
-  if (quoteAt > 0 && (now - quoteAt) > 20 * 60) return false;   // stale = holiday / feed down
-  return true;
-}
-static uint16_t signCol(double v){ return v < 0 ? C_RED : C_BLACK; }
-
-void drawPortfolio() {
-  time_t now; time(&now);
-  header("Portfolio", now, true);
-  display.setFont(&FreeSansBold24pt7b); display.setTextSize(1);
-  int titleW = textW("Portfolio");
-  bool mopen = marketOpen();
-  // CLOSED is yellow, not red: it means "prices are not live", not "you lost money".
-  txt(M + titleW + 22, 46, mopen ? "MARKET OPEN" : "MARKET CLOSED",
-      &FreeSansBold12pt7b, mopen ? C_BLACK : C_YELLOW);
-
-  double mval = 0, day = 0, cost = 0;
-  for (int i = 0; i < NHOLD; i++) {
-    if (HOLD[i].price <= 0) continue;
-    mval += (double)HOLD[i].qty * HOLD[i].price;
-    cost += HOLD[i].cost;
-    if (HOLD[i].prev > 0) day += (double)HOLD[i].qty * (HOLD[i].price - HOLD[i].prev);
-  }
-  double val = mval + CASH_USD, gain = mval - cost;   // treasury is a separate account - excluded
-  double dayPct  = (val - day) > 0 ? day / (val - day) * 100.0 : 0;
-  double gainPct = cost > 0 ? gain / cost * 100.0 : 0;
-
-  label(M, 76, "TOTAL VALUE");
-  txt(16, 154, usd(val), &FreeSansBold24pt7b, C_BLACK, 2);   // 24pt x2 digits are 70px tall;
-                                                             // baseline 154 leaves 7px under the label
-  label(510, 76, "TODAY");
-  txt(510, 110, usdS(day) + "  " + pctS(dayPct), &FreeSansBold18pt7b, signCol(day));
-  label(510, 134, "TOTAL GAIN / LOSS");
-  txt(510, 168, usdS(gain) + "  " + pctS(gainPct), &FreeSansBold18pt7b, signCol(gain));
-  display.fillRect(M, 178, SCR_W - 2 * M, 2, C_BLACK);
-
-  const int cLAST = 270, cDAY = 395, cDPC = 505, cVAL = 650, cTPC = SCR_W - M;
-  label(M, 196, "SYMBOL");
-  txtR(cLAST, 196, "LAST",    &FreeSans9pt7b);
-  txtR(cDAY,  196, "DAY",     &FreeSans9pt7b);
-  txtR(cDPC,  196, "DAY %",   &FreeSans9pt7b);
-  txtR(cVAL,  196, "VALUE",   &FreeSans9pt7b);
-  txtR(cTPC,  196, "TOTAL %", &FreeSans9pt7b);
-
-  int y = 218;
-  for (int i = 0; i < NHOLD; i++, y += 22) {
-    Holding& h = HOLD[i];
-    txt(M, y, h.sym, &FreeSansBold9pt7b);
-    if (h.price <= 0) { txtR(cVAL, y, "no quote", &FreeSans9pt7b, C_RED); continue; }
-    double v = (double)h.qty * h.price;
-    double d = h.prev > 0 ? (double)h.qty * (h.price - h.prev) : 0;
-    double dp = h.prev > 0 ? (h.price / h.prev - 1) * 100.0 : 0;
-    double g = v - h.cost, gp = h.cost > 0 ? g / h.cost * 100.0 : 0;
-    txtR(cLAST, y, f2(h.price), &FreeSans9pt7b);
-    txtR(cDAY,  y, usdS(d),  &FreeSans9pt7b, signCol(d));
-    txtR(cDPC,  y, pctS(dp), &FreeSans9pt7b, signCol(d));
-    txtR(cVAL,  y, usd(v),   &FreeSansBold9pt7b);
-    txtR(cTPC,  y, pctS(gp), &FreeSans9pt7b, gp < -0.005 ? C_RED : C_BLACK);
-  }
-  display.drawFastHLine(M, y - 16, SCR_W - 2 * M, C_BLACK);
-  txt(M, y + 2, "CASH", &FreeSansBold9pt7b);
-  txtR(cVAL, y + 2, usd(CASH_USD), &FreeSansBold9pt7b);
-  txt(M, y + 24, "TREASURY", &FreeSansBold9pt7b);
-  txt(120, y + 24, "separate account - not in the total above", &FreeSans9pt7b);
-  txtR(cVAL, y + 24, usd(TREASURY_USD), &FreeSansBold9pt7b);
-
-  // ---- market context: is my day market-wide or my own? ----
-  // Measure each entry and share the leftover space out as equal gaps - safe for any value length.
-  display.drawFastHLine(M, 430, SCR_W - 2 * M, C_BLACK);
-  {
-    String head[NIDX], chg[NIDX]; int wEnt[NIDX], total = 0;
-    display.setFont(&FreeSans9pt7b); display.setTextSize(1);
-    for (int i = 0; i < NIDX; i++) {
-      if (IDX[i].price <= 0) { head[i] = String(IDX[i].label) + " --"; chg[i] = ""; }
-      else {
-        String v = IDX[i].dec == 0 ? grpAbs(IDX[i].price) : String(IDX[i].price, IDX[i].dec);
-        if (IDX[i].pctUnit) v += "%";
-        head[i] = String(IDX[i].label) + " " + v;
-        if (IDX[i].prev > 0) {
-          char b2[12]; snprintf(b2, sizeof b2, "%+.1f%%", (IDX[i].price / IDX[i].prev - 1) * 100.0);
-          chg[i] = b2;
-        }
-      }
-      wEnt[i] = textW(head[i]) + (chg[i].length() ? 6 + textW(chg[i]) : 0);
-      total += wEnt[i];
-    }
-    int gap = NIDX > 1 ? ((SCR_W - 2 * M) - total) / (NIDX - 1) : 0;
-    if (gap < 8) gap = 8;
-    int x = M;
-    for (int i = 0; i < NIDX; i++) {
-      txt(x, 450, head[i], &FreeSans9pt7b);
-      if (chg[i].length()) {
-        display.setFont(&FreeSans9pt7b); display.setTextSize(1);
-        txt(x + textW(head[i]) + 6, 450, chg[i], &FreeSans9pt7b,
-            chg[i][0] == '-' ? C_RED : C_BLACK);
-      }
-      x += wEnt[i] + gap;
-    }
-  }
-  footer(String("Quotes ") + String(quotesOk) + "/" + String(NHOLD) +
-         (quoteAt > 0 ? String("   as of ") + fmtTime(quoteAt + 3600) : String("")) +
-         "   Updated " + fmtTime(lastGood + 3600) + " ET   " + WiFi.localIP().toString(),
-         "delayed quotes - not advice");
 }
 
 // ---------------- WSJ headlines drawing ----------------
@@ -1847,8 +1658,7 @@ static void pushScreen(void (*draw)()) {
 }
 static void drawCurrent() {
   bool msgOwns = msgText.length() && msgFull;
-  if      (curScreen == SCR_PORTFOLIO && !msgOwns) drawPortfolio();
-  else if (curScreen == SCR_COMED     && !msgOwns) drawComEd();
+  if      (curScreen == SCR_COMED     && !msgOwns) drawComEd();
   else if (curScreen == SCR_FORECAST  && !msgOwns) drawForecast();
   else if (curScreen == SCR_NEWS      && !msgOwns) drawNews();
   else if (curScreen == SCR_AIR       && !msgOwns) drawAir();
@@ -1903,7 +1713,6 @@ textarea,input,select,button{width:100%;font-size:1.05em;margin:.35em 0;box-sizi
 <form class=c method=post action=/alertclear><button>Clear test alert</button></form>
 <h3>Screens</h3>
 <form method=post action=/screen><input type=hidden name=s value=weather><button>Show weather now</button></form>
-<form method=post action=/screen><input type=hidden name=s value=portfolio><button>Show portfolio now</button></form>
 <form method=post action=/screen><input type=hidden name=s value=comed><button>Show ComEd prices now</button></form>
 <form method=post action=/screen><input type=hidden name=s value=forecast><button>Show forecast now</button></form>
 <form method=post action=/screen><input type=hidden name=s value=news><button>Show WSJ headlines now</button></form>
@@ -1920,7 +1729,6 @@ static const char* screenName(Screen v) {
     case SCR_RIVER:     return "river";
     case SCR_SPACE:     return "space";
     case SCR_QUAKE:     return "quake";
-    case SCR_PORTFOLIO: return "portfolio";
     case SCR_COMED:     return "comed";
     case SCR_NEWS:      return "news";
     default:            return "weather";
@@ -1928,8 +1736,7 @@ static const char* screenName(Screen v) {
 }
 static String statusLine() {
   String base = String("Screen: ") + (screenName(curScreen)) +
-                (rotateMs ? "  (rotating every " + String(rotateMs / 60000) + " min, weather every 3rd)" : "  (rotation off)") +
-                "  |  quotes " + String(quotesOk) + "/" + String(NHOLD) +
+                (rotateMs ? "  (rotating every " + String(rotateMs / 60000) + " min: weather, forecast, comed, air, river)" : "  (rotation off)") +
                 "  |  today hi " + (isnan(dayHi) ? String("--") : f1(dayHi) + " at " + fmtTime(dayHiT)) +
                 ", lo " + (isnan(dayLo) ? String("--") : f1(dayLo) + " at " + fmtTime(dayLoT)) +
                 (alertLive() ? String("  |  *** ") + alertEvent + " (" + alertArea + ") until " + fmtTime(alertEnds)
@@ -1971,10 +1778,9 @@ static void startWeb() {
   server.on("/clear", handleClear);
   server.on("/alertclear", [](){ alertTest = false; alertActive = false; needRender = true; wantsHtmlRedirect(); });
   server.on("/status", HTTP_GET, [](){ server.send(200, "text/plain", statusLine() + "\n"); });
-  server.on("/screen", [](){                       // /screen?s=weather|portfolio  - show one now
+  server.on("/screen", [](){                       // /screen?s=weather|comed|...  - show one now
     String w = server.arg("s");
-    if      (w == "portfolio") curScreen = SCR_PORTFOLIO;
-    else if (w == "comed")     curScreen = SCR_COMED;
+    if      (w == "comed")     curScreen = SCR_COMED;
     else if (w == "forecast")  curScreen = SCR_FORECAST;
     else if (w == "news")      curScreen = SCR_NEWS;
     else if (w == "air")       curScreen = SCR_AIR;
@@ -1982,7 +1788,7 @@ static void startWeb() {
     else if (w == "quake")     curScreen = SCR_QUAKE;
     else if (w == "space")     curScreen = SCR_SPACE;
     else if (w == "weather")   curScreen = SCR_WEATHER;
-    else { server.send(400, "text/plain", "s=weather|forecast|air|river|space|quake|portfolio|comed|news\n"); return; }
+    else { server.send(400, "text/plain", "s=weather|forecast|air|river|space|quake|comed|news\n"); return; }
     lastRotate = millis(); needRender = true; wantsHtmlRedirect();
   });
   server.on("/testalert", [](){      // verify the red box without waiting for a storm
@@ -2063,7 +1869,6 @@ void setup() {
     tryN(fetchHistory, "history"); lastHistory = millis();
     bool ok = tryN(fetchCurrent, "current"); lastCurrent = millis();
     backfillDayHiLo();
-    fetchQuotes(); lastQuotes = millis();
     fetchComEd();  lastComed  = millis();
     delay(400); fetchForecast(); lastFc = millis();
     delay(400); fetchAlerts();   lastAlert = millis();
@@ -2085,7 +1890,6 @@ void loop() {
   if (msgText.length() && msgTtlMs && now - msgSetMs >= msgTtlMs) { msgText = ""; needRender = true; Serial.println("message expired"); }
   if (needRender) { needRender = false; lastSig = signature(); render(lastRenderOk); }
   if (now - lastHistory >= HISTORY_MS) { tryN(fetchHistory, "history"); lastHistory = now; }
-  if (now - lastQuotes  >= QUOTES_MS)  { fetchQuotes();                  lastQuotes  = now; }
   if (now - lastComed   >= COMED_MS)   { fetchComEd();                   lastComed   = now; }
   if (now - lastFc      >= FC_MS)      { fetchForecast();                lastFc      = now; }
   if (alertTest && !alertLive()) { alertTest = false; alertActive = false; needRender = true; Serial.println("test alert expired"); }
@@ -2107,9 +1911,8 @@ void loop() {
     if (dayKey >= 0 && lt.tm_yday != dayKey) { Serial.println("new day - refreshing hi/lo"); backfillDayHiLo(); } }
   // Rotation: paused while a message is up, so the message stays put for its whole TTL.
   if (rotateMs && !msgText.length() && !alertLive() && now - lastRotate >= rotateMs) {
-    rotSlot++;
-    if (rotSlot % 3 == 0) curScreen = SCR_WEATHER;
-    else { curScreen = OTHERS[otherIdx]; otherIdx = (otherIdx + 1) % NOTHER; }
+    rotSlot = (rotSlot + 1) % NCYCLE;
+    curScreen = CYCLE[rotSlot];
     lastRotate = now;
     Serial.printf("rotate -> %s\n", screenName(curScreen));
     render(lastRenderOk);

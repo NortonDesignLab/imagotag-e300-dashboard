@@ -1,4 +1,4 @@
-# v1.0 — A nine-screen information panel built from a retired electronic shelf label
+# v1.1 — An eight-screen information panel built from a retired electronic shelf label
 
 Retailers replace **SES-imagotag / Vusion** shelf labels in bulk, and the retired ones sell for very
 little on eBay. Inside an **E300 7.4 BWRY** (model EDB2-0740-A) is a genuinely good four-colour
@@ -8,8 +8,8 @@ board, and plug the panel's own ribbon into a generic driver board. It needs no 
 ESP32 driver board and runs from an ESP32-WROOM-32, or into a Seeed XIAO ePaper Display Board
 EE04 with a XIAO ESP32-S3 Plus. The same sketch builds for either.
 
-This repo turns one into an always-on dashboard that pulls **ten public data sources directly over
-Wi-Fi** — no server, no broker, no cloud account, nothing running on a PC — and rotates through nine
+This repo turns one into an always-on dashboard that pulls **nine public data sources directly over
+Wi-Fi** — no server, no broker, no cloud account, nothing running on a PC — and rotates through its
 screens. It ships with a parametric 3D-printed snap-together frame.
 
 **Start here: [docs/E300-7.4-BWRY.md](docs/E300-7.4-BWRY.md)** — how to identify the right unit,
@@ -21,8 +21,9 @@ teardown photos, wiring, a minimal working sketch, and the four things that cost
 
 ## What it shows
 
-`WeatherPanel4C/` is the four-colour build. Nine screens, rotating every 3 minutes, with live
-weather taking every third slot so it is never more than nine minutes away:
+`WeatherPanel4C/` is the four-colour build. Eight screens. Five rotate every 3 minutes — weather,
+forecast, electricity, air & allergy, river — and the other three are a tap away on the board's web
+page (`/screen?s=space|quake|news`). Change the rotation by editing `CYCLE[]` in the sketch:
 
 | Screen | Contents |
 |---|---|
@@ -32,13 +33,12 @@ weather taking every third slot so it is never more than nine minutes away:
 | **River** | USGS gauge: stage, streamflow, 24-hour trend |
 | **Space Weather** | Planetary Kp with storm banding and a three-day chart on a time-labelled axis |
 | **Earthquakes** | US events, M2.5+ in 24 h, sorted **nearest-first** by great-circle distance |
-| **Portfolio** | Holdings with day and total gain/loss, market open/closed, and an index strip (S&P, Nasdaq, VIX, 10-year, gold) |
 | **Electricity** | ComEd hourly pricing with a 24-hour chart and an 8¢ alert line |
 | **News** | Headlines with relative ages |
 
 The fourth colour earns its place as a **caution tier between black and red** — UV 3–5, pollen or
 asthma in the Medium band, AQI 51–100, Kp 4, M5 quakes, lightning earlier today but not within the
-hour, a closed market (prices are not live), and the electricity hour still in progress.
+hour, and the electricity hour still in progress.
 
 ## Severe weather takes over
 
@@ -61,11 +61,11 @@ curl -X POST http://<board-ip>/message \
 
 `rt.ambientweather.net` · `api.weather.gov` · `pollen.com` · `air-quality-api.open-meteo.com` ·
 `waterservices.usgs.gov` · `earthquake.usgs.gov` · `services.swpc.noaa.gov` ·
-`query1.finance.yahoo.com` · `hourlypricing.comed.com` · `news.google.com`
+`hourlypricing.comed.com` · `news.google.com`
 
-Only Ambient Weather needs credentials, and those are your own station's — the other eight screens
+Only Ambient Weather needs credentials, and those are your own station's — the other seven screens
 work with no account anywhere. Polling is staggered by volatility: severe alerts every 2 minutes,
-electricity every 5, weather and quotes every 10, river and quakes every 15, the rest every 30.
+electricity every 5, weather every 10, river and quakes every 15, the rest every 30.
 
 ## What else is in here
 
@@ -77,10 +77,9 @@ electricity every 5, weather and quotes every 10, river and quakes every 15, the
 | `WeatherEpaper/` | Tri-colour sibling on a GDEH075Z90 880×528 panel, via GxEPD2 |
 | `frame/` | Parametric snap-together 3-part frame with a driver-board enclosure |
 
-Credentials, station name, **site location** (coordinates, NWS grid, pollen ZIP, river gauge and
-flood stages) **and portfolio positions** all live in `secrets.h`, which is gitignored.
-Copy `secrets.h.example` — it ships with a demo portfolio of five index ETFs so the Portfolio screen
-works immediately.
+Credentials, station name and **site location** (coordinates, NWS grid, pollen ZIP, river gauge and
+flood stages) live in `secrets.h`, which is gitignored. Copy `secrets.h.example`, which ships with
+downtown-Chicago demo values.
 
 ---
 
@@ -104,14 +103,15 @@ The parts that cost hours and are not findable by searching:
 - **Timestamp formats differ per source.** NWS carries a local offset (`-06:00`); Ambient Weather
   uses `Z`. Assume UTC everywhere and alert expiry times land hours out.
 - **ComEd's daily feed is JavaScript, not JSON**, and despite the `Date.UTC(...)` wrapper those hours
-  are local clock hours.
+  are local clock hours — and **hour-ending**: entry `18` is the 5–6 pm average, which matches the
+  5-minute feed to the hundredth. Read it as hour-starting and every bar sits one hour late.
 - **GFX fonts are ASCII-only** — headlines full of curly quotes render as blanks unless
   transliterated.
 - **Lay dense rows out by measurement, not assumed character widths.** Fixed columns overlapped in
   practice because the real font was ~10 px/char, not the 8 estimated.
 - **Never use `//` inside a line-continued macro.** The preprocessor splices the continuations into
   one logical line *before* stripping comments, so one `//` silently swallows everything after it.
-  It still compiles — it cost six of seven portfolio holdings before the symptom surfaced.
+  It still compiles — six of seven entries in a config list vanished before the symptom surfaced.
 
 ## Requirements
 
@@ -120,10 +120,10 @@ One of two driver boards (the sketch picks its pins and hostname from the board 
 - **Waveshare e-Paper ESP32 Driver Board (Rev3)**, ESP32-WROOM-32E, 4 MB flash, no PSRAM.
   Hostname `ndl-panel`. Build with
   `--fqbn esp32:esp32:esp32:FlashSize=4M,PartitionScheme=huge_app`; the default 1.3 MB app
-  partition runs out around the fourth screen. 41% of flash, 33% of RAM.
+  partition runs out around the fourth screen. 41% of flash.
 - **Seeed XIAO ePaper Display Board EE04** with a **XIAO ESP32-S3 Plus**, 16 MB flash, 8 MB PSRAM,
   24-pin FPC, three keys and a LiPo connector. Hostname `ndl-panel-s3`. Build with
-  `--fqbn esp32:esp32:XIAO_ESP32S3_Plus:PSRAM=opi,PartitionScheme=app3M_fat9M_16MB`. 40% of flash.
+  `--fqbn esp32:esp32:XIAO_ESP32S3_Plus:PSRAM=opi,PartitionScheme=app3M_fat9M_16MB`. 39% of flash.
   The S3 has room for the full frame buffer, but the band-paged renderer is kept so there is one
   code path. Pins: DC 10, RST 38, BUSY 4, CS 44, SCK 7, MOSI 9.
 
@@ -135,6 +135,5 @@ plus an E300 7.4" BWRY panel (E2741QS0B3) · `arduino-cli` with esp32 core 3.3.1
 
 ## Roadmap
 
-- Web/NVS-editable portfolio holdings, so trades do not need a reflash
 - Home lab health screen (service up/down, GPU temps) off an existing Prometheus
 - Flight tracker fed by a local ADS-B receiver
